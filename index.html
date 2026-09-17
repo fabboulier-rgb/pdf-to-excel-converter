@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure PDF to Excel Converter</title>
+    <!-- PDF.js for parsing PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <!-- SheetJS for creating Excel files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: #fff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+        .drop-zone {
+            border: 2px dashed #007bff;
+            border-radius: 8px;
+            padding: 40px 20px;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-bottom: 20px;
+        }
+        .drop-zone.dragover {
+            background: #e9f2ff;
+        }
+        .drop-zone p {
+            margin: 0;
+            color: #007bff;
+            font-weight: 600;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        button {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        #progress-container {
+            display: none;
+            margin-bottom: 20px;
+        }
+        #progress-bar {
+            width: 100%;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #progress-fill {
+            height: 10px;
+            width: 0%;
+            background: #28a745;
+            transition: width 0.2s;
+        }
+        #status {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        #download-btn {
+            display: none;
+            background: #28a745;
+        }
+        #download-btn:hover {
+            background: #218838;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Secure PDF to Excel</h2>
+    <p style="font-size: 14px; color: #666; margin-bottom: 25px;">100% Client-Side. Your files never leave this browser.</p>
+    
+    <div class="drop-zone" id="drop-zone">
+        <p>Drag & Drop your PDF here or Click to Browse</p>
+        <input type="file" id="file-input" accept="application/pdf">
+    </div>
+
+    <div id="file-info" style="margin-bottom: 20px; font-weight: bold; color: #333;"></div>
+
+    <button id="convert-btn" disabled>Convert to Excel</button>
+
+    <div id="progress-container">
+        <div id="progress-bar"><div id="progress-fill"></div></div>
+        <div id="status">Processing...</div>
+    </div>
+
+    <button id="download-btn">Download Excel File</button>
+</div>
+
+<script>
+    // Set up PDF.js worker
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileInfo = document.getElementById('file-info');
+    const convertBtn = document.getElementById('convert-btn');
+    const progressContainer = document.getElementById('progress-container');
+    const progressFill = document.getElementById('progress-fill');
+    const statusText = document.getElementById('status');
+    const downloadBtn = document.getElementById('download-btn');
+
+    let currentFile = null;
+    let excelWorkbook = null;
+
+    // Drag and Drop Logic
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) {
+            handleFileSelection(e.dataTransfer.files[0]);
+        }
+    });
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleFileSelection(e.target.files[0]);
+        }
+    });
+
+    function handleFileSelection(file) {
+        if (file.type !== 'application/pdf') {
+            alert('Please upload a valid PDF file.');
+            return;
+        }
+        currentFile = file;
+        fileInfo.textContent = `Selected: ${file.name}`;
+        convertBtn.disabled = false;
+        downloadBtn.style.display = 'none';
+        progressContainer.style.display = 'none';
+    }
+
+    convertBtn.addEventListener('click', async () => {
+        if (!currentFile) return;
+
+        convertBtn.disabled = true;
+        progressContainer.style.display = 'block';
+        downloadBtn.style.display = 'none';
+        progressFill.style.width = '0%';
+        
+        try {
+            const arrayBuffer = await currentFile.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+            const totalPages = pdf.numPages;
+            let allRows = [];
+
+            for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                statusText.textContent = `Parsing page ${pageNum} of ${totalPages}...`;
+                progressFill.style.width = `${(pageNum / totalPages) * 100}%`;
+                
+                const page = await pdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+                
+                // Group text items by their Y coordinate (simulating table rows)
+                let rowsMap = new Map();
+                const Y_TOLERANCE = 5; // Pixels tolerance for items on the same row
+
+                textContent.items.forEach(item => {
+                    const x = item.transform[4];
+                    const y = item.transform[5];
+                    const text = item.str.trim();
+                    
+                    if (!text) return; // Skip empty strings
+
+                    let added = false;
+                    for (let [rowY, rowItems] of rowsMap.entries()) {
+                        if (Math.abs(rowY - y) < Y_TOLERANCE) {
+                            rowItems.push({ x, text });
+                            added = true;
+                            break;
+                        }
+                    }
+                    if (!added) {
+                        rowsMap.set(y, [{ x, text }]);
+                    }
+                });
+
+                // Sort rows top-to-bottom (PDF Y coordinate goes bottom-to-top)
+                const sortedY = Array.from(rowsMap.keys()).sort((a, b) => b - a);
+                
+                sortedY.forEach(y => {
+                    // Sort items in a row left-to-right
+                    const rowItems = rowsMap.get(y).sort((a, b) => a.x - b.x);
+                    const rowTextArray = rowItems.map(item => item.text);
+                    allRows.push(rowTextArray);
+                });
+            }
+
+            statusText.textContent = "Generating Excel file...";
+            
+            // Create Excel Workbook using SheetJS
+            const worksheet = XLSX.utils.aoa_to_sheet(allRows);
+            excelWorkbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(excelWorkbook, worksheet, "Extracted Data");
+
+            statusText.textContent = "Conversion Complete!";
+            downloadBtn.style.display = 'block';
+
+        } catch (error) {
+            console.error(error);
+            statusText.textContent = "An error occurred during conversion.";
+            statusText.style.color = "red";
+        } finally {
+            convertBtn.disabled = false;
+        }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+        if (excelWorkbook) {
+            // Remove the .pdf extension and append .xlsx
+            const baseName = currentFile.name.replace(/\.[^/.]+$/, "");
+            XLSX.writeFile(excelWorkbook, `${baseName}_converted.xlsx`);
+        }
+    });
+</script>
+
+</body>
+</html>
